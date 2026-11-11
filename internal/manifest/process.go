@@ -14,7 +14,7 @@ import (
 
 // ProcessManifest reads and processes a single manifest file and creates symlinks in all destination directories.
 func ProcessManifest(manifestPath, blobDir string, destDirs []string, logger *logrus.Logger) error {
-	logger.WithField("manifest_path", manifestPath).Info("Starting processing of manifest")
+	logger.WithField("manifest_path", manifestPath).Debug("Starting processing of manifest")
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -38,7 +38,9 @@ func ProcessManifest(manifestPath, blobDir string, destDirs []string, logger *lo
 		}
 	}
 	if modelFile == "" {
-		return fmt.Errorf("no valid model file found in manifest")
+		// Not a GGUF model (e.g. an image model stored as raw tensors): nothing to link.
+		logger.WithField("manifest_path", manifestPath).Debug("Skipping manifest with no GGUF model layer")
+		return nil
 	}
 
 	modelConfigData, err := os.ReadFile(modelConfigPath)
@@ -72,11 +74,15 @@ func ProcessManifest(manifestPath, blobDir string, destDirs []string, logger *lo
 		symlinkName := filepath.Join(modelDir,
 			fmt.Sprintf("%s-%s-%s.%s", modelName, modelConfig.ModelType, fileType, modelConfig.ModelFormat))
 
+		if target, err := os.Readlink(symlinkName); err == nil && target == modelFile {
+			logger.WithField("symlink", symlinkName).Debug("Symlink already up to date")
+			continue
+		}
 		if _, err := os.Lstat(symlinkName); err == nil {
 			if err := os.Remove(symlinkName); err != nil {
 				logger.WithField("symlink", symlinkName).Warn("Failed to remove existing symlink")
 			} else {
-				logger.WithField("symlink", symlinkName).Info("Removed existing symlink")
+				logger.WithField("symlink", symlinkName).Info("Removed stale symlink")
 			}
 		}
 
@@ -109,7 +115,7 @@ func ProcessManifest(manifestPath, blobDir string, destDirs []string, logger *lo
 		logger.WithFields(logrus.Fields{
 			"model_file": modelFile,
 			"symlink":    symlinkName,
-		}).Info("Completed symlink creation process")
+		}).Debug("Completed symlink creation process")
 	}
 
 	return nil
